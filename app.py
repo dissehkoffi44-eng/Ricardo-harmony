@@ -7,12 +7,11 @@ from collections import Counter
 import io
 import streamlit.components.v1 as components
 import requests  
-import gc                 
+import gc                    
 
 # --- CONFIGURATION & CSS ---
 st.set_page_config(page_title="KEY V7 ULTIMATE HARMONIC", page_icon="🎧", layout="wide")
 
-# CSS combiné (Style du V7 avec les ajouts du V6)
 st.markdown("""
     <style>
     .stApp { background-color: #F8F9FA; color: #212529; }
@@ -97,10 +96,11 @@ def get_camelot_pro(key_mode_str):
         else: return BASE_CAMELOT_MAJOR.get(key, "??")
     except: return "??"
 
-# --- MOTEUR ANALYSE (CONSERVÉ DU CODE 1) ---
+# --- MOTEUR ANALYSE OPTIMISÉ ---
 def analyze_segment(y, sr, tuning=0.0):
     NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-    chroma = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=512, n_chroma=12, tuning=tuning)
+    # Augmentation du hop_length pour accélérer le calcul chromatique
+    chroma = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=1024, n_chroma=12, tuning=tuning)
     chroma_avg = np.mean(chroma, axis=1)
     PROFILES = {
         "major": [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88], 
@@ -113,19 +113,32 @@ def analyze_segment(y, sr, tuning=0.0):
             if score > best_score: best_score, res_key = score, f"{NOTES[i]} {mode}"
     return res_key, best_score
 
-@st.cache_data(show_spinner="Analyse Harmonique Profonde...", max_entries=20)
+@st.cache_data(show_spinner="Analyse Harmonique Profonde (Full Track)...", max_entries=20)
 def get_full_analysis(file_bytes, file_name):
-    y, sr = librosa.load(io.BytesIO(file_bytes), sr=None, duration=210)
+    # OPTIMISATION 1 : Charger avec un sample rate réduit (22050 Hz suffit largement pour les notes)
+    y, sr = librosa.load(io.BytesIO(file_bytes), sr=22050)
+    
     tuning_offset = librosa.estimate_tuning(y=y, sr=sr)
+    
+    # OPTIMISATION 2 : HPSS sur un signal plus léger
     y_harm = librosa.effects.hpss(y)[0]
     duration = librosa.get_duration(y=y, sr=sr)
     timeline_data, votes = [], []
     
-    for start_t in range(0, int(duration) - 10, 10):
-        y_seg = y_harm[int(start_t*sr):int((start_t+10)*sr)]
+    # Barre de progression interne pour les longs morceaux
+    progress_bar = st.progress(0)
+    
+    step = 10
+    for i, start_t in enumerate(range(0, int(duration) - step, step)):
+        y_seg = y_harm[int(start_t*sr):int((start_t+step)*sr)]
         key_seg, score_seg = analyze_segment(y_seg, sr, tuning=tuning_offset)
         votes.append(key_seg)
         timeline_data.append({"Temps": start_t, "Note": key_seg, "Confiance": round(float(score_seg) * 100, 1)})
+        
+        # Mise à jour de la barre
+        progress_bar.progress(min(start_t / duration, 1.0))
+    
+    progress_bar.empty()
     
     df_tl = pd.DataFrame(timeline_data)
     counts = Counter(votes)
@@ -169,7 +182,6 @@ def get_full_analysis(file_bytes, file_name):
 # --- INTERFACE ---
 st.markdown("<h1 style='text-align: center;'>🎧 KEY V7 ULTIMATE HARMONIC</h1>", unsafe_allow_html=True)
 
-# Sidebar (Maintenance du Code 2)
 with st.sidebar:
     st.header("⚙️ MAINTENANCE")
     if st.button("🧹 VIDER TOUT"):
@@ -179,11 +191,10 @@ with st.sidebar:
         gc.collect()
         st.rerun()
 
-# Initialisation des états
 if 'processed_files' not in st.session_state: st.session_state.processed_files = {}
 if 'order_list' not in st.session_state: st.session_state.order_list = []
 
-files = st.file_uploader("📂 DEPOSEZ VOS TRACKS", type=['mp3', 'wav', 'flac'], accept_multiple_files=True)
+files = st.file_uploader("📂 DEPOSEZ VOS TRACKS (ILLIMITÉ)", type=['mp3', 'wav', 'flac'], accept_multiple_files=True)
 tabs = st.tabs(["📁 ANALYSEUR", "🕒 HISTORIQUE"])
 
 with tabs[0]:
@@ -191,11 +202,10 @@ with tabs[0]:
         for f in files:
             fid = f"{f.name}_{f.size}"
             if fid not in st.session_state.processed_files:
-                with st.spinner(f"Analyse en cours : {f.name}"):
+                with st.spinner(f"Analyse intégrale : {f.name}..."):
                     f_bytes = f.read()
                     res = get_full_analysis(f_bytes, f.name)
                     
-                    # Envoi Telegram (Code 2)
                     tg_cap = (f"🎵 {res['file_name']}\n🥁 BPM: {res['tempo']} | E: {res['energy']}/10\n"
                               f"━━━━━━━━━━━━━━━\n"
                               f"🔥 RECOMMANDÉ: {res['recommended']['note']} ({get_camelot_pro(res['recommended']['note'])}) • {res['recommended']['conf']}%\n"
@@ -231,7 +241,7 @@ with tabs[0]:
                 with c4: 
                     st.markdown(f'<div class="metric-container"><div class="label-custom">ÉNERGIE</div><div class="value-custom">{res["energy"]}/10</div><div>Harmonique</div></div>', unsafe_allow_html=True)
 
-                st.plotly_chart(px.scatter(pd.DataFrame(res['timeline']), x="Temps", y="Note", color="Confiance", size="Confiance", template="plotly_white", title="Analyse Temporelle"), use_container_width=True)
+                st.plotly_chart(px.scatter(pd.DataFrame(res['timeline']), x="Temps", y="Note", color="Confiance", size="Confiance", template="plotly_white", title="Analyse Temporelle Totale"), use_container_width=True)
 
 with tabs[1]:
     if st.session_state.processed_files:
