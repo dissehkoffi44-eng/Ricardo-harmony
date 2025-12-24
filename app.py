@@ -29,7 +29,6 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- SECURITÉ & CONSTANTES ---
-# Récupération sécurisée via Streamlit Secrets
 TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN", "VOTRE_TOKEN_DE_SECOURS")
 CHAT_ID = st.secrets.get("CHAT_ID", "VOTRE_CHAT_ID")
 
@@ -103,17 +102,13 @@ def get_sine_witness(note_mode_str, key_suffix=""):
     </script>
     """, height=40)
 
-# --- MOTEUR ANALYSE OPTIMISÉ (VECTORISÉ) ---
+# --- MOTEUR ANALYSE OPTIMISÉ ---
 @st.cache_data(show_spinner="Analyse Harmonique Profonde...", ttl=3600)
 def get_full_analysis(file_bytes, file_name):
-    # Chargement
     y, sr = librosa.load(io.BytesIO(file_bytes), sr=22050)
-    
-    # Prétraitement
     tuning_offset = librosa.estimate_tuning(y=y, sr=sr)
     y_harm = librosa.effects.hpss(y)[0]
     
-    # Extraction Globale (Plus rapide que le bouclage manuel)
     hop_length = 1024
     chroma = librosa.feature.chroma_cens(y=y_harm, sr=sr, hop_length=hop_length, tuning=tuning_offset)
     rms = librosa.feature.rms(y=y_harm, hop_length=hop_length)[0]
@@ -124,12 +119,10 @@ def get_full_analysis(file_bytes, file_name):
     
     timeline_data, weighted_votes = [], []
 
-    # Analyse par fenêtres avec pondération RMS
     for i in range(0, chroma.shape[1] - step_frames, step_frames):
         window = chroma[:, i:i+step_frames]
         window_rms = np.mean(rms[i:i+step_frames])
-        
-        if window_rms < 0.01: continue # Skip silence
+        if window_rms < 0.01: continue 
         
         chroma_avg = np.mean(window, axis=1)
         best_score, res_key = -1, ""
@@ -141,7 +134,6 @@ def get_full_analysis(file_bytes, file_name):
                     best_score, res_key = score, f"{NOTES[n]} {mode}"
         
         if res_key:
-            # On stocke le vote pondéré par l'énergie du segment
             weighted_votes.append((res_key, window_rms))
             timeline_data.append({
                 "Temps": int(librosa.frames_to_time(i, sr=sr, hop_length=hop_length)),
@@ -152,33 +144,47 @@ def get_full_analysis(file_bytes, file_name):
     if not weighted_votes:
         return {"file_name": file_name, "recommended": {"note": "N/A", "conf": 0, "label": "ERREUR", "bg": "red"}}
 
-    # Calcul de la note dominante (pondérée)
-    vote_counts = {}
-    for note, weight in weighted_votes:
-        vote_counts[note] = vote_counts.get(note, 0) + weight
+    # --- AJOUT RÈGLE : HEURISTIQUE HARMONIQUE (V -> i) ---
+    # On compte les occurrences de chaque accord pour détecter les dominantes
+    raw_counts = Counter([v[0] for v in weighted_votes])
     
-    n1 = max(vote_counts, key=vote_counts.get)
+    # Correction : Si on a un accord Majeur qui est la dominante (V) d'un accord mineur présent
+    # Exemple : Si Majeur est détecté mais Mi Mineur est aussi présent -> Priorité au Mi Mineur
+    final_vote_counts = {}
+    for note_mode, weight in weighted_votes:
+        note, mode = note_mode.split(' ')
+        
+        # Logique de redirection : Si "Note Majeur" est la dominante d'une "Note-5 mineur"
+        # On transfère une partie du poids à la tonique probable
+        idx_current = NOTES.index(note)
+        idx_target = (idx_current + 5) % 12 # +5 demi-tons = quinte juste au dessus
+        probable_tonic = f"{NOTES[idx_target]} minor"
+        
+        if mode == "major" and probable_tonic in raw_counts:
+            # On booste la tonique mineure car l'accord majeur joue le rôle de dominante
+            final_vote_counts[probable_tonic] = final_vote_counts.get(probable_tonic, 0) + (weight * 1.5)
+        else:
+            final_vote_counts[note_mode] = final_vote_counts.get(note_mode, 0) + weight
+
+    n1 = max(final_vote_counts, key=final_vote_counts.get)
     
-    # Calcul des stats secondaires
+    # --- FIN DE RÈGLE ---
+
     df_tl = pd.DataFrame(timeline_data)
     purity = (len(df_tl[df_tl['Note'] == n1]) / len(df_tl)) * 100
     avg_conf_n1 = df_tl[df_tl['Note'] == n1]['Confiance'].mean()
     
-    # Note Solide (Stabilité temporelle)
     df_tl['is_stable'] = df_tl['Note'] == df_tl['Note'].shift(1)
     note_solide = df_tl[df_tl['is_stable']]['Note'].mode().iloc[0] if not df_tl[df_tl['is_stable']].empty else n1
     solid_conf = int(df_tl[df_tl['Note'] == note_solide]['Confiance'].mean())
 
-    # Tempo
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-    
-    # Score final et Label
     musical_score = min(int((purity * 0.4) + (avg_conf_n1 * 0.6)), 100)
+    
     if musical_score > 85: label, bg = "NOTE INDISCUTABLE", "linear-gradient(135deg, #00b09b 0%, #96c93d 100%)"
     elif musical_score > 65: label, bg = "NOTE TRÈS FIABLE", "linear-gradient(135deg, #2193b0 0%, #6dd5ed 100%)"
     else: label, bg = "ANALYSE COMPLEXE", "linear-gradient(135deg, #f83600 0%, #f9d423 100%)"
 
-    # Nettoyage mémoire
     del y, y_harm, chroma, rms
     gc.collect()
 
@@ -188,7 +194,7 @@ def get_full_analysis(file_bytes, file_name):
         "note_solide": note_solide, "solid_conf": solid_conf,
         "vote": n1, "vote_conf": int(purity),
         "n1": n1, "n2": df_tl['Note'].value_counts().index[1] if len(df_tl['Note'].unique()) > 1 else n1,
-        "c1": int(purity), "c2": 0, # c2 simplifié pour la perf
+        "c1": int(purity), "c2": 0,
         "tempo": int(float(tempo)), "energy": int(np.clip(musical_score/10, 1, 10)),
         "timeline": timeline_data
     }
