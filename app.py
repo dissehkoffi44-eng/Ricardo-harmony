@@ -7,7 +7,7 @@ from collections import Counter
 import io
 import streamlit.components.v1 as components
 import requests  
-import gc                             
+import gc                   
 from scipy.signal import butter, lfilter
 
 # --- CONFIGURATION & CSS ---
@@ -146,7 +146,6 @@ def get_full_analysis(file_bytes, file_name):
 
     df_tl = pd.DataFrame(timeline_data)
     
-    # --- CALCUL DE LA STABILITÉ ET RÉSOLUTION (RÈGLES MUSICALES) ---
     df_tl['is_stable'] = df_tl['Note'] == df_tl['Note'].shift(1)
     last_note = df_tl['Note'].iloc[-1]
     
@@ -155,26 +154,17 @@ def get_full_analysis(file_bytes, file_name):
         note_mask = df_tl['Note'] == note
         count = note_mask.sum()
         avg_conf = df_tl[note_mask]['Confiance'].mean()
-        repos_bonus = df_tl[note_mask & df_tl['is_stable']].shape[0] * 3.0 # Prime à la tenue de note
-        
-        # Règle de la Tonique de fin (La résolution)
+        repos_bonus = df_tl[note_mask & df_tl['is_stable']].shape[0] * 3.0
         final_bonus = 30 if note == last_note else 0
-        
         stability_scores[note] = (count * 0.2) + (avg_conf * 0.2) + (repos_bonus * 0.3) + final_bonus
 
     note_solide = max(stability_scores, key=stability_scores.get)
-    
-    # --- ARBITRAGE FINAL PROFESSIONNEL ---
     counts = Counter(votes)
     n1 = counts.most_common(1)[0][0]
     
-    # Détermination de la tonique réelle (Arbitrage entre fréquence et repos)
-    # On privilégie la note de repos si elle a une confiance suffisante (>70)
     rec_note = note_solide if df_tl[df_tl['Note'] == note_solide]['Confiance'].mean() >= 70 else n1
-    
     final_conf = int(df_tl[df_tl['Note'] == rec_note]['Confiance'].mean())
 
-    # Application de la contrainte : Si la confiance est < 70, on marque comme incertain
     if final_conf < 70:
         label, bg = "ANALYSE INCERTAINE (<70%)", "linear-gradient(135deg, #232526 0%, #414345 100%)"
     elif final_conf > 88:
@@ -188,10 +178,10 @@ def get_full_analysis(file_bytes, file_name):
         "file_name": file_name,
         "recommended": {"note": rec_note, "conf": final_conf, "label": label, "bg": bg},
         "note_solide": note_solide, "solid_conf": int(df_tl[df_tl['Note'] == note_solide]['Confiance'].mean()),
-        "vote": n1, "vote_conf": int((counts[n1]/len(votes))*100),
-        "n1": n1, "c1": int((counts[n1]/len(votes))*100), 
+        "vote": n1, "vote_conf": int(df_tl[df_tl['Note'] == n1]['Confiance'].mean()),
+        "n1": n1, "c1": int(df_tl[df_tl['Note'] == n1]['Confiance'].mean()), 
         "n2": counts.most_common(2)[1][0] if len(counts)>1 else n1, 
-        "c2": int((counts.most_common(2)[1][1]/len(votes))*100) if len(counts)>1 else 0,
+        "c2": int(df_tl[df_tl['Note'] == (counts.most_common(2)[1][0] if len(counts)>1 else n1)]['Confiance'].mean()),
         "tempo": int(float(tempo)), "energy": int(np.clip(final_conf/10, 1, 10)),
         "timeline": timeline_data
     }
@@ -223,13 +213,22 @@ with tabs[0]:
                     f_bytes = f.read()
                     res = get_full_analysis(f_bytes, f.name)
                     if res["recommended"]["note"] != "N/A":
+                        # RAPPORT TELEGRAM AMÉLIORÉ
                         tg_cap = (
                             f"🎵 *FICHIER* : {res['file_name']}\n"
                             f"━━━━━━━━━━━━━━━━━━━━\n"
-                            f"🔥 *TONIQUE FINALE* : {res['recommended']['note']} ({get_camelot_pro(res['recommended']['note'])})\n"
-                            f"↳ Confiance : {res['recommended']['conf']}%\n"
-                            f"↳ Statut : {res['recommended']['label']}\n\n"
-                            f"💎 *REPOS STRUCTUREL* : {res['note_solide']}\n"
+                            f"🏆 *RECOMMANDATION FINALE* :\n"
+                            f"   *Note* : {res['recommended']['note']} ({get_camelot_pro(res['recommended']['note'])})\n"
+                            f"   *Confiance* : {res['recommended']['conf']}%\n"
+                            f"   *Statut* : {res['recommended']['label']}\n\n"
+                            f"💎 *REPOS STRUCTUREL* :\n"
+                            f"   *Note* : {res['note_solide']} ({get_camelot_pro(res['note_solide'])})\n"
+                            f"   *Confiance* : {res['solid_conf']}%\n\n"
+                            f"📊 *DÉTAILS DES MODALITÉS* :\n"
+                            f"   🥇 Top 1 : {res['n1']} ({get_camelot_pro(res['n1'])}) - {res['c1']}%\n"
+                            f"   🥈 Top 2 : {res['n2']} ({get_camelot_pro(res['n2'])}) - {res['c2']}%\n\n"
+                            f"⏱ *TEMPO* : {res['tempo']} BPM\n"
+                            f"⚡ *ENERGIE* : {res['energy']}/10\n"
                             f"━━━━━━━━━━━━━━━━━━━━"
                         )
                         upload_to_telegram(io.BytesIO(f_bytes), f.name, tg_cap)
@@ -249,21 +248,21 @@ with tabs[0]:
 
                 c1, c2, c3, c4, c5 = st.columns(5)
                 with c1: 
-                    st.markdown(f'<div class="metric-container"><div class="label-custom">FRÉQUENCE</div><div class="value-custom">{res["vote"]}</div><div>{res["vote_conf"]}% présence</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-container"><div class="label-custom">FRÉQUENCE (TOP 1)</div><div class="value-custom">{res["vote"]}</div><div style="font-weight:bold; color:#6366F1;">{get_camelot_pro(res["vote"])} • {res["vote_conf"]}%</div></div>', unsafe_allow_html=True)
                     get_sine_witness(res["vote"], f"dom_{fid}")
                 with c2:
-                    st.markdown(f'<div class="metric-container" style="border: 2px solid #FFD700;"><div class="label-custom">💎 REPOS (TONIQUE)</div><div class="value-custom" style="color: #D4AF37;">{res["note_solide"]}</div><div>Stabilité max</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-container" style="border: 2px solid #FFD700;"><div class="label-custom">💎 REPOS (TONIQUE)</div><div class="value-custom" style="color: #D4AF37;">{res["note_solide"]}</div><div style="font-weight:bold; color:#D4AF37;">{get_camelot_pro(res["note_solide"])} • {res["solid_conf"]}%</div></div>', unsafe_allow_html=True)
                     get_sine_witness(res["note_solide"], f"solid_{fid}")
                 with c3: 
-                    st.markdown(f'<div class="metric-container"><div class="label-custom">BPM</div><div class="value-custom">{res["tempo"]}</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-container"><div class="label-custom">BPM</div><div class="value-custom">{res["tempo"]}</div><div style="font-size:0.8em; color:#999;">Analyse Rythmique</div></div>', unsafe_allow_html=True)
                 with c4: 
-                    st.markdown(f'<div class="metric-container"><div class="label-custom">MODALITÉ 1 & 2</div><div style="font-size:0.9em;">🥇 {res["n1"]}</div><div style="font-size:0.9em;">🥈 {res["n2"]}</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-container"><div class="label-custom">MODALITÉ 1 & 2</div><div style="font-size:0.9em; font-weight:bold;">🥇 {res["n1"]} ({get_camelot_pro(res["n1"])}) : {res["c1"]}%</div><div style="font-size:0.9em; font-weight:bold;">🥈 {res["n2"]} ({get_camelot_pro(res["n2"])}) : {res["c2"]}%</div></div>', unsafe_allow_html=True)
                 with c5: 
-                    st.markdown(f'<div class="metric-container"><div class="label-custom">PUISSANCE</div><div class="value-custom">{res["energy"]}/10</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-container"><div class="label-custom">PUISSANCE</div><div class="value-custom">{res["energy"]}/10</div><div style="font-size:0.8em; color:#999;">Score Harmonique</div></div>', unsafe_allow_html=True)
 
                 st.plotly_chart(px.scatter(pd.DataFrame(res['timeline']), x="Temps", y="Note", color="Confiance", size="Confiance", template="plotly_white", title="Graphique Temporel - Détermination de la Tonique de Repos"), use_container_width=True)
 
 with tabs[1]:
     if st.session_state.processed_files:
-        hist_data = [{"Fichier": r["file_name"], "Note": r['recommended']['note'], "Confiance": f"{r['recommended']['conf']}%", "BPM": r["tempo"]} for r in st.session_state.processed_files.values()]
+        hist_data = [{"Fichier": r["file_name"], "Note": f"{r['recommended']['note']} ({get_camelot_pro(r['recommended']['note'])})", "Confiance": f"{r['recommended']['conf']}%", "BPM": r["tempo"]} for r in st.session_state.processed_files.values()]
         st.dataframe(pd.DataFrame(hist_data), use_container_width=True)
