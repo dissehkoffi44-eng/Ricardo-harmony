@@ -143,35 +143,36 @@ def get_full_analysis(file_bytes, file_name):
     if not weighted_votes:
         return {"file_name": file_name, "recommended": {"note": "N/A", "conf": 0, "label": "ERREUR", "bg": "red"}}
 
-    # --- CALCUL DE LA TONIQUE GLOBALE (RÈGLE DIAMANT SOLIDE) ---
-    # On analyse toutes les notes du graphique Plotly pour trouver la tonique réelle
-    all_notes_on_graph = [v[0] for v in weighted_votes]
-    counts = Counter(all_notes_on_graph)
+    # --- CALCUL DE LA TONIQUE GLOBALE VIA CADENCE PARFAITE (DIAMANT) ---
+    all_points = [v[0] for v in weighted_votes]
+    counts = Counter(all_points)
     
-    # On cherche quelle note est la meilleure candidate pour être la tonique
-    # de l'ensemble des points affichés.
     tonicity_scores = {}
     for candidate in counts.keys():
         cand_note, cand_mode = candidate.split(' ')
         idx_cand = NOTES.index(cand_note)
         
-        # Score de base : sa présence sur le graphique
-        score = counts[candidate] * 1.2 
+        # Poids basé sur la présence réelle sur le graphique
+        score = counts[candidate] * 1.5 
         
-        # Bonus de relation : si d'autres notes sur le graphique sont sa quinte ou sa dominante
+        # ANALYSE DE LA CADENCE : Si une autre note sur le graphique est la dominante (V)
+        # de notre candidat, alors le candidat est très probablement la vraie Tonique.
         for other in counts.keys():
             if other == candidate: continue
             oth_note, oth_mode = other.split(' ')
             idx_oth = NOTES.index(oth_note)
             
-            # Si 'other' est la dominante (V) de 'candidate'
-            if (idx_oth == (idx_cand + 7) % 12) or (idx_oth == (idx_cand + 2) % 12):
-                score += counts[other] * 0.8
+            # Relation de Quinte (V -> I) : La dominante est 7 demi-tons au dessus
+            if idx_oth == (idx_cand + 7) % 12:
+                # Si l'autre note est Majeure (Dominante classique), le bonus est énorme
+                bonus = 2.0 if oth_mode == "major" else 1.2
+                score += counts[other] * bonus
         
         tonicity_scores[candidate] = score
 
+    # La Note Solide devient la gagnante de cette analyse de cadence
     note_solide = max(tonicity_scores, key=tonicity_scores.get)
-    n1 = note_solide # La recommandation suit maintenant la tonique la plus solide
+    n1 = note_solide 
     
     df_tl = pd.DataFrame(timeline_data)
     purity = (len(df_tl[df_tl['Note'] == n1]) / len(df_tl)) * 100
