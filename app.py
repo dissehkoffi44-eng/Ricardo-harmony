@@ -113,6 +113,7 @@ def get_full_analysis(file_bytes, file_name):
     chroma = librosa.feature.chroma_cens(y=y_harm, sr=sr, hop_length=hop_length, tuning=tuning_offset)
     rms = librosa.feature.rms(y=y_harm, hop_length=hop_length)[0]
     
+    duration = librosa.get_duration(y=y, sr=sr)
     step_sec = 10
     step_frames = int(librosa.time_to_frames(step_sec, sr=sr, hop_length=hop_length))
     
@@ -143,43 +144,39 @@ def get_full_analysis(file_bytes, file_name):
     if not weighted_votes:
         return {"file_name": file_name, "recommended": {"note": "N/A", "conf": 0, "label": "ERREUR", "bg": "red"}}
 
-    # --- CALCUL DE LA TONIQUE GLOBALE VIA CADENCE PARFAITE (DIAMANT) ---
-    all_points = [v[0] for v in weighted_votes]
-    counts = Counter(all_points)
+    # --- AJOUT RÈGLE : HEURISTIQUE HARMONIQUE (V -> i) ---
+    # On compte les occurrences de chaque accord pour détecter les dominantes
+    raw_counts = Counter([v[0] for v in weighted_votes])
     
-    tonicity_scores = {}
-    for candidate in counts.keys():
-        cand_note, cand_mode = candidate.split(' ')
-        idx_cand = NOTES.index(cand_note)
+    # Correction : Si on a un accord Majeur qui est la dominante (V) d'un accord mineur présent
+    # Exemple : Si Majeur est détecté mais Mi Mineur est aussi présent -> Priorité au Mi Mineur
+    final_vote_counts = {}
+    for note_mode, weight in weighted_votes:
+        note, mode = note_mode.split(' ')
         
-        # Poids basé sur la présence réelle sur le graphique
-        score = counts[candidate] * 1.5 
+        # Logique de redirection : Si "Note Majeur" est la dominante d'une "Note-5 mineur"
+        # On transfère une partie du poids à la tonique probable
+        idx_current = NOTES.index(note)
+        idx_target = (idx_current + 5) % 12 # +5 demi-tons = quinte juste au dessus
+        probable_tonic = f"{NOTES[idx_target]} minor"
         
-        # ANALYSE DE LA CADENCE : Si une autre note sur le graphique est la dominante (V)
-        # de notre candidat, alors le candidat est très probablement la vraie Tonique.
-        for other in counts.keys():
-            if other == candidate: continue
-            oth_note, oth_mode = other.split(' ')
-            idx_oth = NOTES.index(oth_note)
-            
-            # Relation de Quinte (V -> I) : La dominante est 7 demi-tons au dessus
-            if idx_oth == (idx_cand + 7) % 12:
-                # Si l'autre note est Majeure (Dominante classique), le bonus est énorme
-                bonus = 2.0 if oth_mode == "major" else 1.2
-                score += counts[other] * bonus
-        
-        tonicity_scores[candidate] = score
+        if mode == "major" and probable_tonic in raw_counts:
+            # On booste la tonique mineure car l'accord majeur joue le rôle de dominante
+            final_vote_counts[probable_tonic] = final_vote_counts.get(probable_tonic, 0) + (weight * 1.5)
+        else:
+            final_vote_counts[note_mode] = final_vote_counts.get(note_mode, 0) + weight
 
-    # La Note Solide devient la gagnante de cette analyse de cadence
-    note_solide = max(tonicity_scores, key=tonicity_scores.get)
-    n1 = note_solide 
+    n1 = max(final_vote_counts, key=final_vote_counts.get)
     
+    # --- FIN DE RÈGLE ---
+
     df_tl = pd.DataFrame(timeline_data)
     purity = (len(df_tl[df_tl['Note'] == n1]) / len(df_tl)) * 100
     avg_conf_n1 = df_tl[df_tl['Note'] == n1]['Confiance'].mean()
-    solid_conf = int(avg_conf_n1)
-
-    # --- FIN DE RÈGLE ---
+    
+    df_tl['is_stable'] = df_tl['Note'] == df_tl['Note'].shift(1)
+    note_solide = df_tl[df_tl['is_stable']]['Note'].mode().iloc[0] if not df_tl[df_tl['is_stable']].empty else n1
+    solid_conf = int(df_tl[df_tl['Note'] == note_solide]['Confiance'].mean())
 
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
     musical_score = min(int((purity * 0.4) + (avg_conf_n1 * 0.6)), 100)
