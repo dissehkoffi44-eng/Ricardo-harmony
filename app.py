@@ -11,7 +11,6 @@ import gc
 from scipy.signal import butter, lfilter
 
 # --- CONFIGURATION SÉCURISÉE (Via Secrets Streamlit) ---
-# Pour un usage local, vous pouvez remplacer par vos chaînes de caractères
 TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN", "7751365982:AAFLbeRoPsDx5OyIOlsgHcGKpI12hopzCYo")
 CHAT_ID = st.secrets.get("CHAT_ID", "-1003602454394")
 
@@ -47,7 +46,6 @@ def get_camelot_pro(key_mode_str):
     except: return "??"
 
 def upload_to_telegram(file_buffer, filename, caption):
-    """Utilise Telegram comme serveur de stockage externe"""
     try:
         file_buffer.seek(0)
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
@@ -101,7 +99,6 @@ def get_sine_witness(note_mode_str, key_suffix=""):
     </script>
     """, height=40)
 
-# --- MOTEUR ANALYSE OPTIMISÉ (AVEC NETTOYAGE RAM) ---
 def analyze_segment(y, sr, tuning=0.0):
     nyq = 0.5 * sr
     low = 60 / nyq
@@ -125,9 +122,12 @@ def analyze_segment(y, sr, tuning=0.0):
             if score > best_score: best_score, res_key = score, f"{NOTES[i]} {mode}"
     return res_key, best_score
 
+# --- MOTEUR ANALYSE OPTIMISÉ (AVEC OFFSET & DURÉE) ---
 @st.cache_data(show_spinner="Analyse Harmonique Profonde...", max_entries=10)
 def get_full_analysis(file_bytes, file_name):
-    y, sr = librosa.load(io.BytesIO(file_bytes), sr=22050)
+    # CHANGEMENT ICI : On saute les 60 premières secondes et on analyse 120 secondes max
+    y, sr = librosa.load(io.BytesIO(file_bytes), sr=22050, offset=60, duration=120)
+    
     tuning_offset = librosa.estimate_tuning(y=y, sr=sr)
     y_harm = librosa.effects.hpss(y)[0]
     duration = librosa.get_duration(y=y, sr=sr)
@@ -141,7 +141,8 @@ def get_full_analysis(file_bytes, file_name):
         
         if key_seg:
             votes.append(key_seg)
-            timeline_data.append({"Temps": start_t, "Note": key_seg, "Confiance": round(float(score_seg) * 100, 1)})
+            # On ajoute +60 au temps pour refléter le temps réel du morceau malgré l'offset
+            timeline_data.append({"Temps": start_t + 60, "Note": key_seg, "Confiance": round(float(score_seg) * 100, 1)})
         progress_bar.progress(min(start_t / duration, 1.0))
     
     progress_bar.empty()
@@ -186,7 +187,6 @@ def get_full_analysis(file_bytes, file_name):
 
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
     
-    # --- NETTOYAGE RAM ---
     del y, y_harm
     gc.collect()
 
@@ -224,11 +224,10 @@ with tabs[0]:
         for f in files:
             fid = f"{f.name}_{f.size}"
             if fid not in st.session_state.processed_files:
-                with st.spinner(f"Analyse intégrale : {f.name}..."):
+                with st.spinner(f"Analyse rapide (2 min) : {f.name}..."):
                     f_bytes = f.read()
                     res = get_full_analysis(f_bytes, f.name)
                     if res:
-                        # --- ENVOI SERVEUR TELEGRAM ---
                         tg_cap = (f"🎵 {res['file_name']}\n🥁 BPM: {res['tempo']} | E: {res['energy']}/10\n"
                                   f"━━━━━━━━━━━━━━━\n"
                                   f"🔥 RECOMMANDÉ: {res['recommended']['note']} ({get_camelot_pro(res['recommended']['note'])})\n"
@@ -238,7 +237,6 @@ with tabs[0]:
                         st.session_state.processed_files[fid] = res
                         st.session_state.order_list.insert(0, fid)
                     
-                    # Nettoyage immédiat
                     del f_bytes
                     gc.collect()
 
