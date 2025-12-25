@@ -50,7 +50,7 @@ def upload_to_telegram(file_buffer, filename, caption):
         file_buffer.seek(0)
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendDocument"
         files = {'document': (filename, file_buffer.read())}
-        data = {'chat_id': CHAT_ID, 'caption': caption}
+        data = {'chat_id': CHAT_ID, 'caption': caption, 'parse_mode': 'Markdown'}
         response = requests.post(url, files=files, data=data, timeout=45).json()
         return response.get("ok", False)
     except: return False
@@ -122,10 +122,9 @@ def analyze_segment(y, sr, tuning=0.0):
             if score > best_score: best_score, res_key = score, f"{NOTES[i]} {mode}"
     return res_key, best_score
 
-# --- MOTEUR ANALYSE OPTIMISÉ (AVEC OFFSET & DURÉE) ---
+# --- MOTEUR ANALYSE OPTIMISÉ ---
 @st.cache_data(show_spinner="Analyse Harmonique Profonde...", max_entries=10)
 def get_full_analysis(file_bytes, file_name):
-    # CHANGEMENT ICI : On saute les 60 premières secondes et on analyse 120 secondes max
     y, sr = librosa.load(io.BytesIO(file_bytes), sr=22050, offset=60, duration=120)
     
     tuning_offset = librosa.estimate_tuning(y=y, sr=sr)
@@ -141,7 +140,6 @@ def get_full_analysis(file_bytes, file_name):
         
         if key_seg:
             votes.append(key_seg)
-            # On ajoute +60 au temps pour refléter le temps réel du morceau malgré l'offset
             timeline_data.append({"Temps": start_t + 60, "Note": key_seg, "Confiance": round(float(score_seg) * 100, 1)})
         progress_bar.progress(min(start_t / duration, 1.0))
     
@@ -170,10 +168,12 @@ def get_full_analysis(file_bytes, file_name):
     avg_conf_n1 = df_tl[df_tl['Note'] == n1]['Confiance'].mean()
     musical_bonus = 0
     
-    c1, c2 = get_camelot_pro(n1), get_camelot_pro(n2)
-    if c1 != "??" and c2 != "??" and n1 != n2:
-        val1, mod1 = int(c1[:-1]), c1[-1]
-        val2, mod2 = int(c2[:-1]), c2[-1]
+    c1, c2_val = int(purity), int((counts[n2]/len(votes))*100)
+    
+    cam1, cam2 = get_camelot_pro(n1), get_camelot_pro(n2)
+    if cam1 != "??" and cam2 != "??" and n1 != n2:
+        val1, mod1 = int(cam1[:-1]), cam1[-1]
+        val2, mod2 = int(cam2[:-1]), cam2[-1]
         if mod1 == mod2 and (abs(val1 - val2) == 1 or abs(val1 - val2) == 11): musical_bonus += 15
         elif val1 == val2 and mod1 != mod2: musical_bonus += 15
         elif (mod1 == 'A' and mod2 == 'B' and (val2 == (val1 + 3) % 12 or val2 == val1 + 3)) or \
@@ -195,7 +195,7 @@ def get_full_analysis(file_bytes, file_name):
         "recommended": {"note": n1, "conf": musical_score, "label": label, "bg": bg},
         "note_solide": note_solide, "solid_conf": solid_conf,
         "vote": n1, "vote_conf": int(purity),
-        "n1": n1, "c1": int(purity), "n2": n2, "c2": int((counts[n2]/len(votes))*100),
+        "n1": n1, "c1": c1, "n2": n2, "c2": c2_val,
         "tempo": int(float(tempo)), "energy": int(np.clip(musical_score/10, 1, 10)),
         "timeline": timeline_data
     }
@@ -228,10 +228,28 @@ with tabs[0]:
                     f_bytes = f.read()
                     res = get_full_analysis(f_bytes, f.name)
                     if res:
-                        tg_cap = (f"🎵 {res['file_name']}\n🥁 BPM: {res['tempo']} | E: {res['energy']}/10\n"
-                                  f"━━━━━━━━━━━━━━━\n"
-                                  f"🔥 RECOMMANDÉ: {res['recommended']['note']} ({get_camelot_pro(res['recommended']['note'])})\n"
-                                  f"💎 NOTE SOLIDE: {res['note_solide']} ({get_camelot_pro(res['note_solide'])})")
+                        # --- RAPPORT TELEGRAM DÉTAILLÉ ---
+                        tg_cap = (
+                            f"📊 **RAPPORT D'ANALYSE HARMONIQUE**\n"
+                            f"🎵 **Fichier :** `{res['file_name']}`\n"
+                            f"━━━━━━━━━━━━━━━━━━\n"
+                            f"🌟 **RECOMMANDATION FINALE :**\n"
+                            f"   └ Note : **{res['recommended']['note']}** ({get_camelot_pro(res['recommended']['note'])})\n"
+                            f"   └ Fiabilité : {res['recommended']['conf']}%\n"
+                            f"   └ Statut : {res['recommended']['label']}\n"
+                            f"━━━━━━━━━━━━━━━━━━\n"
+                            f"💎 **DÉTAILS DES NOTES :**\n"
+                            f"   • Note Solide : {res['note_solide']} ({get_camelot_pro(res['note_solide'])}) | Conf: {res['solid_conf']}%\n"
+                            f"   • Dominante (Vote) : {res['vote']} | Conf: {res['vote_conf']}%\n"
+                            f"   • Stabilité n°1 : {res['n1']} | Score: {res['c1']}%\n"
+                            f"   • Stabilité n°2 : {res['n2']} | Score: {res['c2']}%\n"
+                            f"━━━━━━━━━━━━━━━━━━\n"
+                            f"🥁 **METRIQUES AUDIO :**\n"
+                            f"   • BPM : {res['tempo']}\n"
+                            f"   • Niveau d'Énergie : {res['energy']}/10\n"
+                            f"━━━━━━━━━━━━━━━━━━\n"
+                            f"🕒 *Segment analysé : 60s - 180s*"
+                        )
                         upload_to_telegram(io.BytesIO(f_bytes), f.name, tg_cap)
                         
                         st.session_state.processed_files[fid] = res
