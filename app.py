@@ -125,7 +125,7 @@ def analyze_segment(y, sr, tuning=0.0):
 # --- MOTEUR ANALYSE OPTIMISÉ ---
 @st.cache_data(show_spinner="Analyse Harmonique Profonde...", max_entries=10)
 def get_full_analysis(file_bytes, file_name):
-    y, sr = librosa.load(io.BytesIO(file_bytes), sr=22050, offset=60, duration=120)
+    y, sr = librosa.load(io.BytesIO(file_bytes), sr=22050, offset=50, duration=150)
     
     tuning_offset = librosa.estimate_tuning(y=y, sr=sr)
     y_harm = librosa.effects.hpss(y)[0]
