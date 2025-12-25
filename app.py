@@ -15,7 +15,7 @@ TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN", "7751365982:AAFLbeRoPsDx5OyIOl
 CHAT_ID = st.secrets.get("CHAT_ID", "-1003602454394")
 
 # --- CONFIGURATION PAGE & CSS ORIGINAL ---
-st.set_page_config(page_title="KEY ULTIMATE HARMONIC 3", page_icon="🎧", layout="wide")
+st.set_page_config(page_title="RCDJ228 ULTIME KEY", page_icon="🎧", layout="wide")
 
 st.markdown("""
     <style>
@@ -201,7 +201,7 @@ def get_full_analysis(file_bytes, file_name):
     }
 
 # --- INTERFACE ---
-st.markdown("<h1 style='text-align: center;'>🎧 KEY ULTIMATE HARMONIC 3</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>🎧 RCDJ228 ULTIME KEY</h1>", unsafe_allow_html=True)
 
 with st.sidebar:
     st.header("⚙️ SERVEUR & CACHE")
