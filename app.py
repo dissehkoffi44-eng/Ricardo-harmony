@@ -86,36 +86,63 @@ def get_sine_witness(note_mode_str, key_suffix=""):
     return components.html(f"""
     <div style="display: flex; align-items: center; justify-content: center; gap: 10px; font-family: sans-serif;">
         <button id="{unique_id}" style="background: #6366F1; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px;">▶</button>
-        <span style="font-size: 9px; font-weight: bold; color: #666;">{note} {mode[:3].upper()}</span>
+        <span style="font-size: 9px; font-weight: bold; color: #666;">{note} {mode[:3].upper()} PIANO</span>
     </div>
     <script>
     const notesFreq = {{'C':261.63,'C#':277.18,'D':293.66,'D#':311.13,'E':329.63,'F':349.23,'F#':369.99,'G':392.00,'G#':415.30,'A':440.00,'A#':466.16,'B':493.88}};
-    let audioCtx = null; let oscillators = []; let gainNode = null;
+    let audioCtx = null;
+    let activeNodes = [];
+
+    function playPianoNote(freq, startTime) {{
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        
+        // Synthèse de type "Piano" simple (Oscillateur Triangle + Harmoniques)
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, startTime);
+        
+        // Enveloppe ADSR Piano
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.4, startTime + 0.02); // Attaque
+        gain.gain.exponentialRampToValueAtTime(0.01, startTime + 2.5); // Sustain / Release long
+        
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        
+        osc.start(startTime);
+        osc.stop(startTime + 2.6);
+        return {{osc, gain}};
+    }}
+
     document.getElementById('{unique_id}').onclick = function() {{
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
         if (this.innerText === '▶') {{
             this.innerText = '◼'; this.style.background = '#E74C3C';
-            gainNode = audioCtx.createGain();
-            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-            gainNode.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime + 0.1);
-            gainNode.connect(audioCtx.destination);
             const isMinor = '{mode}' === 'minor' || '{mode}' === 'dorian';
-            const intervals = isMinor ? [0, 3, 7] : [0, 4, 7];
-            intervals.forEach(interval => {{
-                let osc = audioCtx.createOscillator();
-                osc.type = 'triangle';
-                let freq = notesFreq['{note}'] * Math.pow(2, interval / 12);
-                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-                osc.connect(gainNode);
-                osc.start();
-                oscillators.push(osc);
+            const intervals = isMinor ? [0, 3, 7, 12] : [0, 4, 7, 12];
+            
+            const now = audioCtx.currentTime;
+            intervals.forEach((interval, index) => {{
+                // Simulation d'un léger décalage entre les doigts (strumming)
+                const freq = notesFreq['{note}'] * Math.pow(2, interval / 12);
+                activeNodes.push(playPianoNote(freq, now + (index * 0.02)));
             }});
+
+            // Reset visuel après 2.5 secondes
+            setTimeout(() => {{
+                this.innerText = '▶'; this.style.background = '#6366F1';
+                activeNodes = [];
+            }}, 2500);
+
         }} else {{
-            if(gainNode) {{
-                gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.1);
-                setTimeout(() => {{ oscillators.forEach(o => o.stop()); oscillators = []; }}, 100);
-            }}
+            activeNodes.forEach(node => {{
+                node.gain.gain.cancelScheduledValues(audioCtx.currentTime);
+                node.gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+                setTimeout(() => node.osc.stop(), 100);
+            }});
             this.innerText = '▶'; this.style.background = '#6366F1';
+            activeNodes = [];
         }}
     }};
     </script>
