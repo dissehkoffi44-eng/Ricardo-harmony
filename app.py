@@ -7,14 +7,14 @@ from collections import Counter
 import io
 import streamlit.components.v1 as components
 import requests  
-import gc                               
+import gc                                
 from scipy.signal import butter, lfilter
 
-# --- CONFIGURATION SÉCURISÉE (Via Secrets Streamlit) ---
+# --- CONFIGURATION SÉCURISÉE ---
 TELEGRAM_TOKEN = st.secrets.get("TELEGRAM_TOKEN", "7751365982:AAFLbeRoPsDx5OyIOlsgHcGKpI12hopzCYo")
 CHAT_ID = st.secrets.get("CHAT_ID", "-1003602454394")
 
-# --- CONFIGURATION PAGE & CSS ORIGINAL ---
+# --- CONFIGURATION PAGE ---
 st.set_page_config(page_title="RCDJ228 ULTIME KEY", page_icon="🎧", layout="wide")
 
 st.markdown("""
@@ -33,7 +33,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- CONSTANTES CAMELOT ---
-BASE_CAMELOT_MINOR = {'Ab':'1A','G#':'1A','Eb':'2A','D#':'2A','Bb':'3A','A#':'3A','F':'4A','C':'5A','G':'6A','D':'7A','A':'8A','E':'9A','B':'10A','F#':'11A','Gb':'11A','Db':'12A','C#':'12A'}
+BASE_CAMELOT_MINOR = {'Ab':'1A','G#' : '1A','Eb':'2A','D#':'2A','Bb':'3A','A#':'3A','F':'4A','C':'5A','G':'6A','D':'7A','A':'8A','E':'9A','B':'10A','F#':'11A','Gb':'11A','Db':'12A','C#':'12A'}
 BASE_CAMELOT_MAJOR = {'B':'1B','F#':'2B','Gb':'2B','Db':'3B','C#':'3B','Ab':'4B','G#':'4B','Eb':'5B','D#':'5B','Bb':'6B','A#':'6B','F':'7B','C':'8B','G':'9B','D':'10B','A':'11B','E':'12B'}
 NOTES_LIST = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 
@@ -47,27 +47,21 @@ def get_camelot_pro(key_mode_str):
     except: return "??"
 
 def detect_perfect_cadence(n1, n2):
-    """Détecte si n2 est la dominante de n1 OU inversement."""
     try:
         root1, root2 = n1.split()[0], n2.split()[0]
         idx1, idx2 = NOTES_LIST.index(root1), NOTES_LIST.index(root2)
-        # Cas 1: n2 est la dominante (V) de n1 (I) -> n1 est la tonique
         if (idx1 + 7) % 12 == idx2: return True, n1
-        # Cas 2: n1 est la dominante (V) de n2 (I) -> n2 est la tonique
         if (idx2 + 7) % 12 == idx1: return True, n2
         return False, n1
     except: return False, n1
 
 def detect_relative_key(n1, n2):
-    """Détecte si n1 et n2 sont des tonalités relatives (ex: Do Maj et La Min)."""
     try:
         c1, c2 = get_camelot_pro(n1), get_camelot_pro(n2)
         if c1 == "??" or c2 == "??": return False, n1
         val1, mod1 = int(c1[:-1]), c1[-1]
         val2, mod2 = int(c2[:-1]), c2[-1]
-        # Dans le système Camelot, les relatives ont le même chiffre mais des lettres A/B différentes
         if val1 == val2 and mod1 != mod2:
-            # En cas de doute relatif, on privilégie souvent la version Mineure (A) pour le mix DJ
             return True, (n1 if mod1 == 'A' else n2)
         return False, n1
     except: return False, n1
@@ -83,15 +77,17 @@ def upload_to_telegram(file_buffer, filename, caption):
     except: return False
 
 def get_sine_witness(note_mode_str, key_suffix=""):
+    """Génère un accord complet (Fondamentale, Tierce, Quinte) pour une meilleure écoute."""
     if note_mode_str == "N/A": return ""
     parts = note_mode_str.split(' ')
     note = parts[0]
     mode = parts[1].lower() if len(parts) > 1 else "major"
     unique_id = f"playBtn_{note}_{mode}_{key_suffix}".replace("#", "sharp").replace(".", "_")
+    
     return components.html(f"""
     <div style="display: flex; align-items: center; justify-content: center; gap: 10px; font-family: sans-serif;">
         <button id="{unique_id}" style="background: #6366F1; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px;">▶</button>
-        <span style="font-size: 9px; font-weight: bold; color: #666;">{note} {mode[:3].upper()}</span>
+        <span style="font-size: 9px; font-weight: bold; color: #666;">{note} {mode[:3].upper()} CHORD</span>
     </div>
     <script>
     const notesFreq = {{'C':261.63,'C#':277.18,'D':293.66,'D#':311.13,'E':329.63,'F':349.23,'F#':369.99,'G':392.00,'G#':415.30,'A':440.00,'A#':466.16,'B':493.88}};
@@ -102,13 +98,15 @@ def get_sine_witness(note_mode_str, key_suffix=""):
             this.innerText = '◼'; this.style.background = '#E74C3C';
             gainNode = audioCtx.createGain();
             gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-            gainNode.gain.linearRampToValueAtTime(0.1, audioCtx.currentTime + 0.1);
+            gainNode.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime + 0.1);
             gainNode.connect(audioCtx.destination);
+            
             const isMinor = '{mode}' === 'minor' || '{mode}' === 'dorian';
-            const intervals = isMinor ? [0, 3, 7] : [0, 4, 7];
+            const intervals = isMinor ? [0, 3, 7] : [0, 4, 7]; // Accord Mineur vs Majeur
+            
             intervals.forEach(interval => {{
                 let osc = audioCtx.createOscillator();
-                osc.type = 'triangle';
+                osc.type = 'triangle'; // Son plus 'musical' qu'un sinus pur
                 let freq = notesFreq['{note}'] * Math.pow(2, interval / 12);
                 osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
                 osc.connect(gainNode);
@@ -187,16 +185,12 @@ def get_full_analysis(file_bytes, file_name):
     n1 = top_votes[0][0]
     n2 = top_votes[1][0] if len(top_votes) > 1 else n1
     
-    # --- LOGIQUE DE DÉCISION MUSICALE AVANCÉE ---
-    musical_bonus = 0
-    
-    # Règle 1 : Tonalités relatives (ex: Do Maj / La Min)
     is_relative, relative_preferred = detect_relative_key(n1, n2)
+    musical_bonus = 0
     if is_relative:
         musical_bonus += 20
         n1 = relative_preferred
 
-    # Règle 2 : Cadence Parfaite (V -> I)
     is_cadence, confirmed_root = detect_perfect_cadence(n1, n2)
     if is_cadence:
         musical_bonus += 30
@@ -223,7 +217,9 @@ def get_full_analysis(file_bytes, file_name):
         "tempo": int(float(tempo)), "energy": int(np.clip(musical_score/10, 1, 10)),
         "timeline": timeline_data,
         "is_cadence": is_cadence,
-        "is_relative": is_relative
+        "is_relative": is_relative,
+        "votes_raw": top_votes,
+        "total_votes": len(votes)
     }
 
 # --- INTERFACE ---
@@ -253,14 +249,25 @@ with tabs[0]:
                     f_bytes = f.read()
                     res = get_full_analysis(f_bytes, f.name)
                     if res:
+                        # --- RAPPORT TELEGRAM DÉTAILLÉ ---
                         tg_cap = (
-                            f"📊 **RAPPORT D'ANALYSE**\n"
-                            f"🎵 `{res['file_name']}`\n"
-                            f"🌟 **CLÉ : {res['recommended']['note']}** ({get_camelot_pro(res['recommended']['note'])})\n"
-                            f"✅ Fiabilité : {res['recommended']['conf']}%\n"
-                            f"🎹 Cadence : {'Oui ✅' if res['is_cadence'] else 'Non'}\n"
-                            f"🔄 Relative : {'Oui ✅' if res['is_relative'] else 'Non'}\n"
-                            f"🥁 BPM : {res['tempo']}"
+                            f"📊 *RAPPORT D'ANALYSE HARMONIQUE*\n"
+                            f"━━━━━━━━━━━━━━━━━━━━\n"
+                            f"🎵 *Fichier :* `{res['file_name']}`\n"
+                            f"🎹 *CLÉ FINALE :* `{res['recommended']['note']}`\n"
+                            f"🎼 *Camelot :* `{get_camelot_pro(res['recommended']['note'])}`\n"
+                            f"🎯 *Fiabilité :* `{res['recommended']['conf']}%`\n"
+                            f"━━━━━━━━━━━━━━━━━━━━\n"
+                            f"📈 *DÉTAILS STATISTIQUES :*\n"
+                            f"• Dominante : {res['n1']} ({res['c1']}%)\n"
+                            f"• Secondaire : {res['n2']} ({res['c2']}%)\n"
+                            f"• Stabilité : {res['solid_conf']}%\n"
+                            f"━━━━━━━━━━━━━━━━━━━━\n"
+                            f"💡 *INDICATEURS MUSICAUX :*\n"
+                            f"• Cadence V-I : {'Oui ✅' if res['is_cadence'] else 'Non ❌'}\n"
+                            f"• Relative détectée : {'Oui ✅' if res['is_relative'] else 'Non ❌'}\n"
+                            f"• BPM estimé : `{res['tempo']}`\n"
+                            f"• Niveau Énergie : `{res['energy']}/10`"
                         )
                         upload_to_telegram(io.BytesIO(f_bytes), f.name, tg_cap)
                         st.session_state.processed_files[fid] = res
@@ -281,10 +288,14 @@ with tabs[0]:
                 """, unsafe_allow_html=True)
 
                 c1, c2, c3, c4, c5 = st.columns(5)
-                with c1: st.markdown(f'<div class="metric-container"><div class="label-custom">DOMINANTE</div><div class="value-custom">{res["vote"]}</div></div>', unsafe_allow_html=True); get_sine_witness(res["vote"], f"v_{fid}")
-                with c2: st.markdown(f'<div class="metric-container" style="border: 2px solid #FFD700;"><div class="label-custom">NOTE SOLIDE</div><div class="value-custom">{res["note_solide"]}</div></div>', unsafe_allow_html=True); get_sine_witness(res["note_solide"], f"s_{fid}")
+                with c1: 
+                    st.markdown(f'<div class="metric-container"><div class="label-custom">DOMINANTE</div><div class="value-custom">{res["vote"]}</div></div>', unsafe_allow_html=True)
+                    get_sine_witness(res["vote"], f"v_{fid}")
+                with c2: 
+                    st.markdown(f'<div class="metric-container" style="border: 2px solid #FFD700;"><div class="label-custom">NOTE SOLIDE</div><div class="value-custom">{res["note_solide"]}</div></div>', unsafe_allow_html=True)
+                    get_sine_witness(res["note_solide"], f"s_{fid}")
                 with c3: st.markdown(f'<div class="metric-container"><div class="label-custom">BPM</div><div class="value-custom">{res["tempo"]}</div></div>', unsafe_allow_html=True)
-                with c4: st.markdown(f'<div class="metric-container"><div class="label-custom">STABILITÉ</div><div>1️⃣ {res["n1"]}</div><div>2️⃣ {res["n2"]}</div></div>', unsafe_allow_html=True)
+                with c4: st.markdown(f'<div class="metric-container"><div class="label-custom">STABILITÉ</div><div>1️⃣ {res["n1"]} ({res["c1"]}%)</div><div>2️⃣ {res["n2"]} ({res["c2"]}%)</div></div>', unsafe_allow_html=True)
                 with c5: st.markdown(f'<div class="metric-container"><div class="label-custom">ÉNERGIE</div><div class="value-custom">{res["energy"]}/10</div></div>', unsafe_allow_html=True)
 
                 st.plotly_chart(px.scatter(pd.DataFrame(res['timeline']), x="Temps", y="Note", color="Confiance", size="Confiance", template="plotly_white"), use_container_width=True)
