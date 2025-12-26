@@ -244,23 +244,35 @@ with tabs[0]:
                     f_bytes = f.read()
                     res = get_full_analysis(f_bytes, f.name)
                     if res:
-                        # --- RAPPORT TELEGRAM ---
+                        # --- RAPPORT TELEGRAM AMÉLIORÉ & DÉTAILLÉ ---
+                        status_emoji = "✅" if res['recommended']['conf'] > 75 else "⚠️"
+                        cadence_status = "🎹 OUI (V-I Détectée)" if res['is_cadence'] else "❌ Non détectée"
+                        relative_status = "🔄 OUI (Relation Majeur/Mineur)" if res['is_relative'] else "❌ Non détectée"
+                        
                         tg_cap = (
-                            f"🎵 *FICHIER* : {res['file_name']}\n"
+                            f"🎵 *RAPPORT D'ANALYSE HARMONIQUE*\n"
                             f"━━━━━━━━━━━━━━━━━━━━\n"
-                            f"🔥 *RECOMMANDÉ* : {res['recommended']['note']} ({get_camelot_pro(res['recommended']['note'])})\n"
-                            f"↳ Précision Finale : {res['recommended']['conf']}%\n"
-                            f"↳ Statut : {res['recommended']['label']}\n\n"
-                            f"💎 *NOTE SOLIDE* : {res['note_solide']} ({get_camelot_pro(res['note_solide'])})\n"
-                            f"↳ Confiance Stabilité : {res['solid_conf']}%\n\n"
-                            f"📊 *STABILITÉ 1 & 2* :\n"
-                            f"🥇 {res['n1']} ({get_camelot_pro(res['n1'])}) : {res['c1']}% présence\n"
-                            f"🥈 {res['n2']} ({get_camelot_pro(res['n2'])}) : {res['c2']}% présence\n\n"
-                            f"⚙️ *MÉTADONNÉES* :\n"
-                            f"🥁 BPM : {res['tempo']}\n"
-                            f"⚡ Énergie Harmonique : {res['energy']}/10\n"
+                            f"📄 *FICHIER* : `{res['file_name']}`\n\n"
+                            f"🔥 *RÉSULTAT FINAL* : `{res['recommended']['note']}`\n"
+                            f"🔑 *SYSTÈME CAMELOT* : `{get_camelot_pro(res['recommended']['note'])}`\n"
+                            f"🎯 *PRÉCISION* : {res['recommended']['conf']}%\n"
+                            f"🏷️ *STATUT* : {res['recommended']['label']} {status_emoji}\n"
+                            f"━━━━━━━━━━━━━━━━━━━━\n"
+                            f"🕵️ *DÉTECTIONS AVANCÉES* :\n"
+                            f"▪️ Cadence Parfaite : {cadence_status}\n"
+                            f"▪️ Tonalité Relative : {relative_status}\n\n"
+                            f"💎 *STABILITÉ (NOTE SOLIDE)* :\n"
+                            f"↳ `{res['note_solide']}` ({get_camelot_pro(res['note_solide'])})\n"
+                            f"↳ Confiance de repos : {res['solid_conf']}%\n\n"
+                            f"📊 *DÉTAILS DES VOTES* :\n"
+                            f"🥇 1er : `{res['n1']}` ({res['c1']}%)\n"
+                            f"🥈 2e : `{res['n2']}` ({res['c2']}%)\n\n"
+                            f"🥁 *RYTHME & ÉNERGIE* :\n"
+                            f"▪️ Tempo estimé : {res['tempo']} BPM\n"
+                            f"▪️ Énergie Harmonique : {res['energy']}/10\n"
                             f"━━━━━━━━━━━━━━━━━━━━"
                         )
+                        
                         upload_to_telegram(io.BytesIO(f_bytes), f.name, tg_cap)
                         st.session_state.processed_files[fid] = res
                         st.session_state.order_list.insert(0, fid)
