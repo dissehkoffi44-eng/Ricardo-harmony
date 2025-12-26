@@ -7,7 +7,7 @@ from collections import Counter
 import io
 import streamlit.components.v1 as components
 import requests  
-import gc                                 
+import gc                                     
 from scipy.signal import butter, lfilter
 
 # --- CONFIGURATION SÉCURISÉE ---
@@ -244,7 +244,7 @@ with tabs[0]:
                     f_bytes = f.read()
                     res = get_full_analysis(f_bytes, f.name)
                     if res:
-                        # --- RAPPORT TELEGRAM INTÉGRÉ DU CODE 2 ---
+                        # --- RAPPORT TELEGRAM ---
                         tg_cap = (
                             f"🎵 *FICHIER* : {res['file_name']}\n"
                             f"━━━━━━━━━━━━━━━━━━━━\n"
