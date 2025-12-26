@@ -7,7 +7,7 @@ from collections import Counter
 import io
 import streamlit.components.v1 as components
 import requests  
-import gc                                
+import gc                                 
 from scipy.signal import butter, lfilter
 
 # --- CONFIGURATION SÉCURISÉE ---
@@ -32,8 +32,8 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- CONSTANTES CAMELOT ---
-BASE_CAMELOT_MINOR = {'Ab':'1A','G#' : '1A','Eb':'2A','D#':'2A','Bb':'3A','A#':'3A','F':'4A','C':'5A','G':'6A','D':'7A','A':'8A','E':'9A','B':'10A','F#':'11A','Gb':'11A','Db':'12A','C#':'12A'}
+# --- CONSTANTES ---
+BASE_CAMELOT_MINOR = {'Ab':'1A','G#':'1A','Eb':'2A','D#':'2A','Bb':'3A','A#':'3A','F':'4A','C':'5A','G':'6A','D':'7A','A':'8A','E':'9A','B':'10A','F#':'11A','Gb':'11A','Db':'12A','C#':'12A'}
 BASE_CAMELOT_MAJOR = {'B':'1B','F#':'2B','Gb':'2B','Db':'3B','C#':'3B','Ab':'4B','G#':'4B','Eb':'5B','D#':'5B','Bb':'6B','A#':'6B','F':'7B','C':'8B','G':'9B','D':'10B','A':'11B','E':'12B'}
 NOTES_LIST = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 
@@ -77,7 +77,6 @@ def upload_to_telegram(file_buffer, filename, caption):
     except: return False
 
 def get_sine_witness(note_mode_str, key_suffix=""):
-    """Génère un accord complet (Fondamentale, Tierce, Quinte) pour une meilleure écoute."""
     if note_mode_str == "N/A": return ""
     parts = note_mode_str.split(' ')
     note = parts[0]
@@ -87,7 +86,7 @@ def get_sine_witness(note_mode_str, key_suffix=""):
     return components.html(f"""
     <div style="display: flex; align-items: center; justify-content: center; gap: 10px; font-family: sans-serif;">
         <button id="{unique_id}" style="background: #6366F1; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px;">▶</button>
-        <span style="font-size: 9px; font-weight: bold; color: #666;">{note} {mode[:3].upper()} CHORD</span>
+        <span style="font-size: 9px; font-weight: bold; color: #666;">{note} {mode[:3].upper()}</span>
     </div>
     <script>
     const notesFreq = {{'C':261.63,'C#':277.18,'D':293.66,'D#':311.13,'E':329.63,'F':349.23,'F#':369.99,'G':392.00,'G#':415.30,'A':440.00,'A#':466.16,'B':493.88}};
@@ -100,13 +99,11 @@ def get_sine_witness(note_mode_str, key_suffix=""):
             gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
             gainNode.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime + 0.1);
             gainNode.connect(audioCtx.destination);
-            
             const isMinor = '{mode}' === 'minor' || '{mode}' === 'dorian';
-            const intervals = isMinor ? [0, 3, 7] : [0, 4, 7]; // Accord Mineur vs Majeur
-            
+            const intervals = isMinor ? [0, 3, 7] : [0, 4, 7];
             intervals.forEach(interval => {{
                 let osc = audioCtx.createOscillator();
-                osc.type = 'triangle'; // Son plus 'musical' qu'un sinus pur
+                osc.type = 'triangle';
                 let freq = notesFreq['{note}'] * Math.pow(2, interval / 12);
                 osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
                 osc.connect(gainNode);
@@ -146,9 +143,9 @@ def analyze_segment(y, sr, tuning=0.0):
             if score > best_score: best_score, res_key = score, f"{NOTES_LIST[i]} {mode}"
     return res_key, best_score
 
-@st.cache_data(show_spinner="Analyse Harmonique Profonde...", max_entries=10)
+@st.cache_data(show_spinner="Analyse Harmonique Profonde...", max_entries=20)
 def get_full_analysis(file_bytes, file_name):
-    y, sr = librosa.load(io.BytesIO(file_bytes), sr=22050, offset=30, duration=250)
+    y, sr = librosa.load(io.BytesIO(file_bytes), sr=22050)
     tuning_offset = librosa.estimate_tuning(y=y, sr=sr)
     y_harm = librosa.effects.hpss(y)[0]
     duration = librosa.get_duration(y=y, sr=sr)
@@ -161,7 +158,7 @@ def get_full_analysis(file_bytes, file_name):
         key_seg, score_seg = analyze_segment(y_seg, sr, tuning=tuning_offset)
         if key_seg:
             votes.append(key_seg)
-            timeline_data.append({"Temps": start_t + 60, "Note": key_seg, "Confiance": round(float(score_seg) * 100, 1)})
+            timeline_data.append({"Temps": start_t, "Note": key_seg, "Confiance": round(float(score_seg) * 100, 1)})
         progress_bar.progress(min(start_t / duration, 1.0))
     
     progress_bar.empty()
@@ -217,9 +214,7 @@ def get_full_analysis(file_bytes, file_name):
         "tempo": int(float(tempo)), "energy": int(np.clip(musical_score/10, 1, 10)),
         "timeline": timeline_data,
         "is_cadence": is_cadence,
-        "is_relative": is_relative,
-        "votes_raw": top_votes,
-        "total_votes": len(votes)
+        "is_relative": is_relative
     }
 
 # --- INTERFACE ---
@@ -249,25 +244,22 @@ with tabs[0]:
                     f_bytes = f.read()
                     res = get_full_analysis(f_bytes, f.name)
                     if res:
-                        # --- RAPPORT TELEGRAM DÉTAILLÉ ---
+                        # --- RAPPORT TELEGRAM INTÉGRÉ DU CODE 2 ---
                         tg_cap = (
-                            f"📊 *RAPPORT D'ANALYSE HARMONIQUE*\n"
+                            f"🎵 *FICHIER* : {res['file_name']}\n"
                             f"━━━━━━━━━━━━━━━━━━━━\n"
-                            f"🎵 *Fichier :* `{res['file_name']}`\n"
-                            f"🎹 *CLÉ FINALE :* `{res['recommended']['note']}`\n"
-                            f"🎼 *Camelot :* `{get_camelot_pro(res['recommended']['note'])}`\n"
-                            f"🎯 *Fiabilité :* `{res['recommended']['conf']}%`\n"
-                            f"━━━━━━━━━━━━━━━━━━━━\n"
-                            f"📈 *DÉTAILS STATISTIQUES :*\n"
-                            f"• Dominante : {res['n1']} ({res['c1']}%)\n"
-                            f"• Secondaire : {res['n2']} ({res['c2']}%)\n"
-                            f"• Stabilité : {res['solid_conf']}%\n"
-                            f"━━━━━━━━━━━━━━━━━━━━\n"
-                            f"💡 *INDICATEURS MUSICAUX :*\n"
-                            f"• Cadence V-I : {'Oui ✅' if res['is_cadence'] else 'Non ❌'}\n"
-                            f"• Relative détectée : {'Oui ✅' if res['is_relative'] else 'Non ❌'}\n"
-                            f"• BPM estimé : `{res['tempo']}`\n"
-                            f"• Niveau Énergie : `{res['energy']}/10`"
+                            f"🔥 *RECOMMANDÉ* : {res['recommended']['note']} ({get_camelot_pro(res['recommended']['note'])})\n"
+                            f"↳ Précision Finale : {res['recommended']['conf']}%\n"
+                            f"↳ Statut : {res['recommended']['label']}\n\n"
+                            f"💎 *NOTE SOLIDE* : {res['note_solide']} ({get_camelot_pro(res['note_solide'])})\n"
+                            f"↳ Confiance Stabilité : {res['solid_conf']}%\n\n"
+                            f"📊 *STABILITÉ 1 & 2* :\n"
+                            f"🥇 {res['n1']} ({get_camelot_pro(res['n1'])}) : {res['c1']}% présence\n"
+                            f"🥈 {res['n2']} ({get_camelot_pro(res['n2'])}) : {res['c2']}% présence\n\n"
+                            f"⚙️ *MÉTADONNÉES* :\n"
+                            f"🥁 BPM : {res['tempo']}\n"
+                            f"⚡ Énergie Harmonique : {res['energy']}/10\n"
+                            f"━━━━━━━━━━━━━━━━━━━━"
                         )
                         upload_to_telegram(io.BytesIO(f_bytes), f.name, tg_cap)
                         st.session_state.processed_files[fid] = res
@@ -279,9 +271,9 @@ with tabs[0]:
             with st.expander(f"🎵 {res['file_name']}", expanded=True):
                 st.markdown(f"""
                     <div class="final-decision-box" style="background: {res['recommended']['bg']};">
-                        <div style="font-size: 1em; text-transform: uppercase;">{res['recommended']['label']}</div>
-                        <div style="font-size: 4.5em; font-weight: 900;">{res['recommended']['note']}</div>
-                        <div style="font-size: 1.8em;">{get_camelot_pro(res['recommended']['note'])} • {res['recommended']['conf']}% PRÉCISION</div>
+                        <div style="font-size: 1em; text-transform: uppercase; letter-spacing: 2px;">{res['recommended']['label']}</div>
+                        <div style="font-size: 4.5em; font-weight: 900; line-height:1; margin: 10px 0;">{res['recommended']['note']}</div>
+                        <div style="font-size: 1.8em; font-weight: 700;">{get_camelot_pro(res['recommended']['note'])} • {res['recommended']['conf']}% PRÉCISION</div>
                         {"<div style='background:rgba(0,0,0,0.2); padding:5px 15px; border-radius:20px; font-size:0.8em; display:inline-block; margin:5px;'>🎹 CADENCE V-I</div>" if res['is_cadence'] else ""}
                         {"<div style='background:rgba(0,0,0,0.2); padding:5px 15px; border-radius:20px; font-size:0.8em; display:inline-block; margin:5px;'>🔄 TONALITÉ RELATIVE</div>" if res['is_relative'] else ""}
                     </div>
@@ -289,18 +281,26 @@ with tabs[0]:
 
                 c1, c2, c3, c4, c5 = st.columns(5)
                 with c1: 
-                    st.markdown(f'<div class="metric-container"><div class="label-custom">DOMINANTE</div><div class="value-custom">{res["vote"]}</div></div>', unsafe_allow_html=True)
-                    get_sine_witness(res["vote"], f"v_{fid}")
+                    st.markdown(f'<div class="metric-container"><div class="label-custom">DOMINANTE</div><div class="value-custom">{res["vote"]}</div><div>{get_camelot_pro(res["vote"])} • {res["vote_conf"]}% presence</div></div>', unsafe_allow_html=True)
+                    get_sine_witness(res["vote"], f"dom_{fid}")
                 with c2: 
-                    st.markdown(f'<div class="metric-container" style="border: 2px solid #FFD700;"><div class="label-custom">NOTE SOLIDE</div><div class="value-custom">{res["note_solide"]}</div></div>', unsafe_allow_html=True)
-                    get_sine_witness(res["note_solide"], f"s_{fid}")
-                with c3: st.markdown(f'<div class="metric-container"><div class="label-custom">BPM</div><div class="value-custom">{res["tempo"]}</div></div>', unsafe_allow_html=True)
-                with c4: st.markdown(f'<div class="metric-container"><div class="label-custom">STABILITÉ</div><div>1️⃣ {res["n1"]} ({res["c1"]}%)</div><div>2️⃣ {res["n2"]} ({res["c2"]}%)</div></div>', unsafe_allow_html=True)
-                with c5: st.markdown(f'<div class="metric-container"><div class="label-custom">ÉNERGIE</div><div class="value-custom">{res["energy"]}/10</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="metric-container" style="border: 2px solid #FFD700;"><div class="label-custom">💎 NOTE SOLIDE</div><div class="value-custom" style="color: #D4AF37;">{res["note_solide"]}</div><div>{get_camelot_pro(res["note_solide"])} • {res["solid_conf"]}%</div></div>', unsafe_allow_html=True)
+                    get_sine_witness(res["note_solide"], f"solid_{fid}")
+                with c3: st.markdown(f'<div class="metric-container"><div class="label-custom">BPM</div><div class="value-custom">{res["tempo"]}</div><div>BPM détecté</div></div>', unsafe_allow_html=True)
+                with c4: 
+                    st.markdown(f'<div class="metric-container"><div class="label-custom">STABILITÉ 1 & 2</div><div style="font-size:0.9em;">🥇 {res["n1"]} ({res["c1"]}%)</div><div style="font-size:0.9em;">🥈 {res["n2"]} ({res["c2"]}%)</div></div>', unsafe_allow_html=True)
+                    col_s1, col_s2 = st.columns(2)
+                    with col_s1: get_sine_witness(res["n1"], f"s1_{fid}")
+                    with col_s2: get_sine_witness(res["n2"], f"s2_{fid}")
+                with c5: st.markdown(f'<div class="metric-container"><div class="label-custom">ÉNERGIE</div><div class="value-custom">{res["energy"]}/10</div><div>Harmonique</div></div>', unsafe_allow_html=True)
 
-                st.plotly_chart(px.scatter(pd.DataFrame(res['timeline']), x="Temps", y="Note", color="Confiance", size="Confiance", template="plotly_white"), use_container_width=True)
+                st.plotly_chart(px.scatter(pd.DataFrame(res['timeline']), x="Temps", y="Note", color="Confiance", size="Confiance", template="plotly_white", title="Analyse Temporelle (La note solide est la ligne de repos la plus stable)"), use_container_width=True)
 
 with tabs[1]:
     if st.session_state.processed_files:
-        hist_df = pd.DataFrame([{"Fichier": r["file_name"], "Note": r['recommended']['note'], "Camelot": get_camelot_pro(r["recommended"]["note"]), "BPM": r["tempo"], "Confiance": f"{r['recommended']['conf']}%"} for r in st.session_state.processed_files.values()])
-        st.dataframe(hist_df, use_container_width=True)
+        hist_data = [{"Fichier": r["file_name"], 
+                      "Note Finale": f"{r['recommended']['note']} ({get_camelot_pro(r['recommended']['note'])})", 
+                      "Note Solide": f"{r['note_solide']} ({get_camelot_pro(r['note_solide'])})",
+                      "BPM": r["tempo"], 
+                      "Confiance": f"{r['recommended']['conf']}%"} for r in st.session_state.processed_files.values()]
+        st.dataframe(pd.DataFrame(hist_data), use_container_width=True)
