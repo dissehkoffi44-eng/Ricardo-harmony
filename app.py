@@ -7,7 +7,7 @@ from collections import Counter
 import io
 import streamlit.components.v1 as components
 import requests  
-import gc                             
+import gc                               
 from scipy.signal import butter, lfilter
 
 # --- CONFIGURATION SÉCURISÉE (Via Secrets Streamlit) ---
@@ -44,6 +44,21 @@ def get_camelot_pro(key_mode_str):
         if mode in ['minor', 'dorian']: return BASE_CAMELOT_MINOR.get(key, "??")
         else: return BASE_CAMELOT_MAJOR.get(key, "??")
     except: return "??"
+
+def detect_perfect_cadence(n1, n2):
+    """Détecte si n2 est la dominante (V) de n1 (I)."""
+    NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+    try:
+        root1 = n1.split()[0]
+        root2 = n2.split()[0]
+        idx1 = NOTES.index(root1)
+        idx2 = NOTES.index(root2)
+        # 7 demi-tons = Quinte juste (Dominante)
+        if (idx1 + 7) % 12 == idx2:
+            return True, n1
+        return False, n1
+    except:
+        return False, n1
 
 def upload_to_telegram(file_buffer, filename, caption):
     try:
@@ -164,9 +179,15 @@ def get_full_analysis(file_bytes, file_name):
     n1 = top_votes[0][0]
     n2 = top_votes[1][0] if len(top_votes) > 1 else n1
     
+    # --- LOGIQUE DE CADENCE PARFAITE ---
+    musical_bonus = 0
+    is_cadence, confirmed_root = detect_perfect_cadence(n1, n2)
+    if is_cadence:
+        musical_bonus += 25
+        n1 = confirmed_root # On priorise la Tonique (I) sur la Dominante (V)
+
     purity = (counts[n1] / len(votes)) * 100
     avg_conf_n1 = df_tl[df_tl['Note'] == n1]['Confiance'].mean()
-    musical_bonus = 0
     
     c1, c2_val = int(purity), int((counts[n2]/len(votes))*100)
     
@@ -197,7 +218,8 @@ def get_full_analysis(file_bytes, file_name):
         "vote": n1, "vote_conf": int(purity),
         "n1": n1, "c1": c1, "n2": n2, "c2": c2_val,
         "tempo": int(float(tempo)), "energy": int(np.clip(musical_score/10, 1, 10)),
-        "timeline": timeline_data
+        "timeline": timeline_data,
+        "is_cadence": is_cadence
     }
 
 # --- INTERFACE ---
@@ -228,6 +250,7 @@ with tabs[0]:
                     f_bytes = f.read()
                     res = get_full_analysis(f_bytes, f.name)
                     if res:
+                        is_cadence = res.get("is_cadence", False)
                         # --- RAPPORT TELEGRAM DÉTAILLÉ ---
                         tg_cap = (
                             f"📊 **RAPPORT D'ANALYSE HARMONIQUE**\n"
@@ -237,6 +260,7 @@ with tabs[0]:
                             f"   └ Note : **{res['recommended']['note']}** ({get_camelot_pro(res['recommended']['note'])})\n"
                             f"   └ Fiabilité : {res['recommended']['conf']}%\n"
                             f"   └ Statut : {res['recommended']['label']}\n"
+                            f"🎹 Cadence détectée : {'Oui ✅' if is_cadence else 'Non'}\n"
                             f"━━━━━━━━━━━━━━━━━━\n"
                             f"💎 **DÉTAILS DES NOTES :**\n"
                             f"   • Note Solide : {res['note_solide']} ({get_camelot_pro(res['note_solide'])}) | Conf: {res['solid_conf']}%\n"
@@ -266,6 +290,7 @@ with tabs[0]:
                         <div style="font-size: 1em; text-transform: uppercase; letter-spacing: 2px;">{res['recommended']['label']}</div>
                         <div style="font-size: 4.5em; font-weight: 900; line-height:1; margin: 10px 0;">{res['recommended']['note']}</div>
                         <div style="font-size: 1.8em; font-weight: 700;">{get_camelot_pro(res['recommended']['note'])} • {res['recommended']['conf']}% PRÉCISION</div>
+                        {"<div style='background:rgba(0,0,0,0.2); display:inline-block; padding:5px 15px; border-radius:20px; font-size:0.8em;'>🎹 CADENCE V-I DÉTECTÉE</div>" if res.get('is_cadence') else ""}
                     </div>
                 """, unsafe_allow_html=True)
 
